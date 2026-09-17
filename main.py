@@ -1,22 +1,19 @@
 import os
 from pathlib import Path
 import chromadb
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 from groq import Groq
 
-# Load environment variables (your Groq API key)
+# Load environment variables
 load_dotenv()
 
-# Initialize FastAPI app
 app = FastAPI(title="Royal Fixora AI Receptionist")
 
-# Allow frontend to talk to this backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,24 +21,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Groq client
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Load embedding model (runs locally, free)
-print("Loading embedding model...")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-print("Embedding model loaded.")
-
-# Initialize ChromaDB (local vector database)
+# Initialize ChromaDB
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="royalfixora")
 
-# Base directory of this file
 BASE_DIR = Path(__file__).parent
 
 
+def get_embeddings(texts: list[str]) -> list[list[float]]:
+    """Get embeddings from Jina AI API (free tier)."""
+    jina_api_key = os.getenv("JINA_API_KEY")
+    if not jina_api_key:
+        raise ValueError("JINA_API_KEY is not set")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {jina_api_key}"
+    }
+    data = {
+        "input": texts,
+        "model": "jina-embeddings-v3",
+        "task": "retrieval.passage",
+        "dimensions": 384
+    }
+    response = requests.post(
+        "https://api.jina.ai/v1/embeddings",
+        headers=headers,
+        json=data
+    )
+    response.raise_for_status()
+    return [item["embedding"] for item in response.json()["data"]]
+
+
 def load_pdfs_from_folder(folder_path: str):
-    """Read all PDFs in a folder and return list of (text, source) chunks."""
+    """Read all PDFs and return chunks."""
     chunks = []
     for filename in os.listdir(folder_path):
         if not filename.endswith(".pdf"):
@@ -52,7 +67,6 @@ def load_pdfs_from_folder(folder_path: str):
         for page in reader.pages:
             full_text += page.extract_text() + "\n"
 
-        # Split into chunks of ~500 characters with 50 char overlap
         chunk_size = 500
         overlap = 50
         start = 0
@@ -60,37 +74,29 @@ def load_pdfs_from_folder(folder_path: str):
             end = start + chunk_size
             chunk = full_text[start:end].strip()
             if chunk:
-                chunks.append({
-                    "text": chunk,
-                    "source": filename
-                })
+                chunks.append({"text": chunk, "source": filename})
             start = end - overlap
     return chunks
 
 
 def build_knowledge_base():
-    """Load PDFs, embed them, and store in ChromaDB."""
-    print("Loading PDFs from knowledge folder...")
+    print("Loading PDFs...")
     chunks = load_pdfs_from_folder("knowledge")
     print(f"Found {len(chunks)} chunks.")
 
-    if len(chunks) == 0:
-        print("No PDFs found in knowledge folder.")
+    if not chunks:
         return
 
-    # Check if already indexed
-    existing = collection.count()
-    if existing > 0:
-        print(f"Knowledge base already has {existing} chunks. Skipping rebuild.")
+    if collection.count() > 0:
+        print("Knowledge base already built.")
         return
 
-    # Embed and store
-    print("Embedding chunks (this may take a minute)...")
+    print("Embedding chunks via Jina AI...")
     texts = [c["text"] for c in chunks]
     sources = [c["source"] for c in chunks]
     ids = [f"chunk_{i}" for i in range(len(chunks))]
 
-    embeddings = embedder.encode(texts).tolist()
+    embeddings = get_embeddings(texts)
 
     collection.add(
         documents=texts,
@@ -98,12 +104,11 @@ def build_knowledge_base():
         metadatas=[{"source": s} for s in sources],
         ids=ids
     )
-    print(f"Stored {len(chunks)} chunks in ChromaDB.")
+    print(f"Stored {len(chunks)} chunks.")
 
 
 @app.on_event("startup")
 def startup_event():
-    """Run knowledge base build when server starts."""
     build_knowledge_base()
 
 
@@ -114,47 +119,32 @@ def root():
 
 @app.post("/chat")
 def chat(question: str):
-    """Answer a question using the knowledge base."""
     question = question.strip()
-
     if not question:
-        return {
-            "answer": "Please type a question and I'll do my best to help.",
-            "sources": []
-        }
+        return {"answer": "Please type a question.", "sources": []}
 
-    # Handle simple greetings without hitting the vector DB
-    greetings = ["hi", "hello", "hey", "salam", "assalam", "assalamualaikum",
-                 "good morning", "good evening", "good afternoon", "thanks",
-                 "thank you", "shukriya", "ok", "okay"]
+    greetings = ["hi", "hello", "hey", "salam", "thanks", "thank you", "ok"]
     if question.lower().strip("!?.,") in greetings:
         return {
-            "answer": "Hello! Welcome to Royal Fixora. I can help you with:\n\n"
-                      "• Service prices (plumbing, electrical, cleaning, painting)\n"
-                      "• Service areas in Islamabad & Rawalpindi\n"
-                      "• Booking and payment questions\n\n"
-                      "What would you like to know?",
+            "answer": "Hello! Welcome to Royal Fixora. Ask me about our services, prices, or coverage areas.",
             "sources": []
         }
 
-    # Embed the question
-    question_embedding = embedder.encode([question]).tolist()
+    # Embed question via Jina
+    question_embedding = get_embeddings([question])[0]
 
-    # Search ChromaDB for top 3 relevant chunks
     results = collection.query(
-        query_embeddings=question_embedding,
+        query_embeddings=[question_embedding],
         n_results=3
     )
 
     if not results["documents"] or not results["documents"][0]:
         return {
-            "answer": "I'm not sure about that. Please contact us on WhatsApp at 0300-1234567 and our team will help you.",
+            "answer": "I'm not sure. Please contact us on WhatsApp at 0300-1234567.",
             "sources": []
         }
 
-    # Build context
-    context_parts = []
-    sources = []
+    context_parts, sources = [], []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
         context_parts.append(doc)
         if meta["source"] not in sources:
@@ -162,15 +152,9 @@ def chat(question: str):
 
     context = "\n\n---\n\n".join(context_parts)
 
-    prompt = f"""You are a friendly AI receptionist for Royal Fixora, a home services company in Islamabad and Rawalpindi.
-
-RULES:
-1. Answer using ONLY the information provided below.
-2. If the answer is not in the information, politely say you don't have that detail and give the WhatsApp number 0300-1234567.
-3. Be warm, brief, and professional. Use 1-3 short sentences.
-4. Always give exact PKR prices when asked about cost.
-5. If the user asks to book or schedule, tell them to message us on WhatsApp at 0300-1234567.
-6. Never invent information that isn't in the context.
+    prompt = f"""You are a friendly AI receptionist for Royal Fixora (home services in Islamabad/Rawalpindi).
+Answer using ONLY the information below. If not found, say you don't know and give WhatsApp 0300-1234567.
+Be warm, brief. Give exact PKR prices.
 
 INFORMATION:
 {context}
@@ -189,12 +173,9 @@ ANSWER:"""
         answer = response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        answer = "I'm having a small technical issue. Please try again in a moment, or contact us on WhatsApp at 0300-1234567."
+        answer = "I'm having a technical issue. Please contact us on WhatsApp at 0300-1234567."
 
-    return {
-        "answer": answer,
-        "sources": sources
-    }
+    return {"answer": answer, "sources": sources}
 
 
 @app.get("/chat.html")

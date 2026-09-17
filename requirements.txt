@@ -3,6 +3,6 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 chromadb
-sentence-transformers
 groq
 pypdf
+requests
