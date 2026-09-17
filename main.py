@@ -24,6 +24,11 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
+# ⚠️ TEMPORARY: force rebuild on next deploy. Remove after first success.
+try:
+    chroma_client.delete_collection(name="royalfixora")
+except Exception:
+    pass
 
 collection = chroma_client.get_or_create_collection(name="royalfixora")
 
@@ -121,10 +126,21 @@ def chat(question: str):
     if not question:
         return {"answer": "Please type a question.", "sources": []}
 
-    greetings = ["hi", "hello", "hey", "salam", "thanks", "thank you", "ok"]
-    if question.lower().strip("!?.,") in greetings:
+    greeting_words = ["hi", "hello", "hey", "salam", "assalam", "thanks",
+                      "thank you", "shukriya", "ok", "okay"]
+    goodbye_words = ["bye", "goodbye", "see you", "good night"]
+
+    cleaned = question.lower().strip("!?.,")
+
+    if cleaned in greeting_words:
         return {
-            "answer": "Hello! Welcome to Royal Fixora. Ask me about our services, prices, or coverage areas.",
+            "answer": "Hello! 👋 Welcome to Royal Fixora. Ask me about our services, prices, or coverage areas.",
+            "sources": []
+        }
+
+    if cleaned in goodbye_words:
+        return {
+            "answer": "Thank you for visiting Royal Fixora! If you need anything, message us on WhatsApp at 0300-1234567. Have a great day! 👋",
             "sources": []
         }
 
@@ -152,9 +168,10 @@ def chat(question: str):
     prompt = f"""You are a friendly AI receptionist for Royal Fixora (home services in Islamabad/Rawalpindi).
 
 Answer using ONLY the information below. If the answer is not in the information, say:
-"I don't have that information. Please contact us on WhatsApp at 0344-1552660."
+"I don't have that information. Please contact us on WhatsApp at 0300-1234567."
 
 Be warm, brief (1-3 sentences). Give exact PKR prices when asked about cost.
+Always use the WhatsApp number 0300-1234567 — never any other number.
 
 INFORMATION:
 {context}
@@ -173,7 +190,7 @@ ANSWER:"""
         answer = response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        answer = "I'm having a technical issue. Please contact us on WhatsApp at 0344-1552660."
+        answer = "I'm having a technical issue. Please contact us on WhatsApp at 0300-1234567."
 
     return {"answer": answer, "sources": sources}
 
