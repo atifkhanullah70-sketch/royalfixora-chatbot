@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Royal Fixora — AI Assistant</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --orange: #e8622c;
+    --orange-dark: #d4541f;
+    --black: #1a1a1a;
+    --gray-bg: #f7f7f5;
+    --border: #ececec;
+  }
+
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--gray-bg);
+    color: var(--black);
+  }
+
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px;
+  }
+
+  .chat-container {
+    width: 100%;
+    max-width: 480px;
+    height: min(720px, calc(100vh - 32px));
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  .chat-header {
+    background: var(--black);
+    color: #fff;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .chat-header .avatar {
+    width: 42px; height: 42px;
+    background: var(--orange);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .chat-header .info { flex: 1; min-width: 0; }
+  .chat-header .info h3 {
+    font-size: 15px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chat-header .info p {
+    font-size: 12px; color: #9a9a9a; margin-top: 2px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    background: #25D366;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(37,211,102,0.2);
+  }
+
+  /* Chat body */
+  .chat-body {
+    flex: 1;
+    padding: 20px 16px;
+    overflow-y: auto;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scroll-behavior: smooth;
+  }
+  .chat-body::-webkit-scrollbar { width: 6px; }
+  .chat-body::-webkit-scrollbar-thumb { background: #d5d5d5; border-radius: 3px; }
+
+  .message {
+    max-width: 88%;
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    animation: fadeIn 0.25s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .message.bot {
+    background: #fff;
+    color: var(--black);
+    align-self: flex-start;
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .message.user {
+    background: var(--black);
+    color: #fff;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+
+  .source-tag {
+    font-size: 11px;
+    color: #999;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #eee;
+    font-style: italic;
+  }
+
+  /* Typing indicator */
+  .typing {
+    display: flex;
+    gap: 4px;
+    padding: 14px 18px;
+    align-self: flex-start;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+  }
+  .typing span {
+    width: 7px; height: 7px;
+    background: #bbb;
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.15s; }
+  .typing span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-5px); opacity: 1; }
+  }
+
+  /* Footer */
+  .chat-footer {
+    padding: 12px 14px;
+    background: #fff;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .chat-footer input {
+    flex: 1;
+    min-width: 0;
+    padding: 12px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 15px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.2s;
+    background: #fafafa;
+  }
+  .chat-footer input:focus { border-color: var(--orange); background: #fff; }
+
+  .chat-footer button {
+    padding: 12px 22px;
+    background: var(--orange);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .chat-footer button:hover:not(:disabled) { background: var(--orange-dark); }
+  .chat-footer button:active:not(:disabled) { transform: scale(0.97); }
+  .chat-footer button:disabled { background: #ccc; cursor: not-allowed; }
+
+  /* WhatsApp button */
+  .whatsapp-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+    margin: 0 14px 14px;
+    padding: 13px;
+    background: #25D366;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14.5px;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .whatsapp-btn:hover { background: #1ebe5b; }
+
+  /* Mobile */
+  @media (max-width: 520px) {
+    body { padding: 0; }
+    .chat-container {
+      height: 100vh;
+      height: 100dvh;
+      max-width: 100%;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .message { font-size: 15px; }
+    .chat-footer button { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="chat-container">
+  <div class="chat-header">
+    <div class="avatar">RF</div>
+    <div class="info">
+      <h3>Royal Fixora Assistant</h3>
+      <p><span class="status-dot"></span> Online — replies instantly</p>
+    </div>
+  </div>
+
+  <div class="chat-body" id="chatBody">
+    <div class="message bot">Hi! 👋 I'm the Royal Fixora assistant. Ask me about our services, prices, or coverage areas.</div>
+  </div>
+
+  <div class="chat-footer">
+    <input id="userInput" type="text" placeholder="Type your question..." autocomplete="off" />
+    <button id="sendBtn">Send</button>
+  </div>
+
+  <a class="whatsapp-btn" href="https://wa.me/923001234567" target="_blank" rel="noopener">
+    <span></span> Book on WhatsApp
+  </a>
+</div>
+
+<script>
+  const chatBody = document.getElementById('chatBody');
+  const userInput = document.getElementById('userInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const API_URL = window.location.origin + '/chat';
+
+  function addMessage(text, sender, sources) {
+    const div = document.createElement('div');
+    div.className = 'message ' + sender;
+
+    const textNode = document.createElement('div');
+    textNode.textContent = text;
+    div.appendChild(textNode);
+
+    if (sources && sources.length > 0) {
+      const src = document.createElement('div');
+      src.className = 'source-tag';
+      src.textContent = '📄 Source: ' + sources.join(', ');
+      div.appendChild(src);
+    }
+
+    chatBody.appendChild(div);
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }
+
+  function showTyping() {
+    const div = document.createElement('div');
+    div.className = 'typing';
+    div.id = 'typingIndicator';
+    div.innerHTML = '<span></span><span></span><span></span>';
+    chatBody.appendChild(div);
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }
+
+  function hideTyping() {
+    const el = document.getElementById('typingIndicator');
+    if (el) el.remove();
+  }
+
+  async function sendMessage() {
+    const question = userInput.value.trim();
+    if (!question) return;
+
+    addMessage(question, 'user');
+    userInput.value = '';
+    sendBtn.disabled = true;
+    sendBtn.textContent = '...';
+    showTyping();
+
+    try {
+      const response = await fetch(API_URL + '?question=' + encodeURIComponent(question), {
+        method: 'POST'
+      });
+
+      if (!response.ok) throw new Error('Server error');
+
+      const data = await response.json();
+      hideTyping();
+      addMessage(data.answer, 'bot', data.sources);
+    } catch (err) {
+      hideTyping();
+      addMessage('Sorry, something went wrong. Please check your connection and try again.', 'bot');
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+      userInput.focus();
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+  });
+
+  userInput.focus();
+</script>
+
+</body>
+</html>
