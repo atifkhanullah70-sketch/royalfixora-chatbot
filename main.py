@@ -3,13 +3,12 @@ from pathlib import Path
 import chromadb
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pypdf import PdfReader
 from groq import Groq
 
-# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="Royal Fixora AI Receptionist")
@@ -23,15 +22,20 @@ app.add_middleware(
 
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Initialize ChromaDB
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
+
+# ⚠️ TEMPORARY: force rebuild on next deploy. Remove after first success.
+try:
+    chroma_client.delete_collection(name="royalfixora")
+except Exception:
+    pass
+
 collection = chroma_client.get_or_create_collection(name="royalfixora")
 
 BASE_DIR = Path(__file__).parent
 
 
-def get_embeddings(texts: list[str]) -> list[list[float]]:
-    """Get embeddings from Jina AI API (free tier)."""
+def get_embeddings(texts: list[str], task: str = "retrieval.passage") -> list[list[float]]:
     jina_api_key = os.getenv("JINA_API_KEY")
     if not jina_api_key:
         raise ValueError("JINA_API_KEY is not set")
@@ -43,7 +47,7 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
     data = {
         "input": texts,
         "model": "jina-embeddings-v3",
-        "task": "retrieval.passage",
+        "task": task,
         "dimensions": 384
     }
     response = requests.post(
@@ -56,7 +60,6 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
 
 
 def load_pdfs_from_folder(folder_path: str):
-    """Read all PDFs and return chunks."""
     chunks = []
     for filename in os.listdir(folder_path):
         if not filename.endswith(".pdf"):
@@ -91,12 +94,12 @@ def build_knowledge_base():
         print("Knowledge base already built.")
         return
 
-    print("Embedding chunks via Jina AI...")
+    print("Embedding chunks via Jina AI (passage)...")
     texts = [c["text"] for c in chunks]
     sources = [c["source"] for c in chunks]
     ids = [f"chunk_{i}" for i in range(len(chunks))]
 
-    embeddings = get_embeddings(texts)
+    embeddings = get_embeddings(texts, task="retrieval.passage")
 
     collection.add(
         documents=texts,
@@ -130,7 +133,7 @@ def chat(question: str):
             "sources": []
         }
 
-    question_embedding = get_embeddings([question])[0]
+    question_embedding = get_embeddings([question], task="retrieval.query")[0]
 
     results = collection.query(
         query_embeddings=[question_embedding],
@@ -152,8 +155,11 @@ def chat(question: str):
     context = "\n\n---\n\n".join(context_parts)
 
     prompt = f"""You are a friendly AI receptionist for Royal Fixora (home services in Islamabad/Rawalpindi).
-Answer using ONLY the information below. If not found, say you don't know and give WhatsApp 0300-1234567.
-Be warm, brief. Give exact PKR prices.
+
+Answer using ONLY the information below. If the answer is not in the information, say:
+"I don't have that information. Please contact us on WhatsApp at 0344-1552660."
+
+Be warm, brief (1-3 sentences). Give exact PKR prices when asked about cost.
 
 INFORMATION:
 {context}
@@ -172,12 +178,11 @@ ANSWER:"""
         answer = response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        answer = "I'm having a technical issue. Please contact us on WhatsApp at 0300-1234567."
+        answer = "I'm having a technical issue. Please contact us on WhatsApp at 0344-1552660."
 
     return {"answer": answer, "sources": sources}
 
 
-# Serve the chat UI — try multiple possible paths so it works in any environment
 @app.get("/chat.html")
 def serve_chat():
     possible_paths = [
