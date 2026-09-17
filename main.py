@@ -24,11 +24,6 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-# ⚠️ TEMPORARY: force rebuild on next deploy. Remove after first success.
-try:
-    chroma_client.delete_collection(name="royalfixora")
-except Exception:
-    pass
 
 collection = chroma_client.get_or_create_collection(name="royalfixora")
 
