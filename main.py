@@ -130,7 +130,6 @@ def chat(question: str):
             "sources": []
         }
 
-    # Embed question via Jina
     question_embedding = get_embeddings([question])[0]
 
     results = collection.query(
@@ -178,6 +177,19 @@ ANSWER:"""
     return {"answer": answer, "sources": sources}
 
 
+# Serve the chat UI — try multiple possible paths so it works in any environment
 @app.get("/chat.html")
 def serve_chat():
-    return FileResponse(BASE_DIR / "chat.html")
+    possible_paths = [
+        BASE_DIR / "chat.html",
+        Path("chat.html"),
+        Path("/app/chat.html"),
+        Path.cwd() / "chat.html",
+    ]
+    for p in possible_paths:
+        if p.exists():
+            return FileResponse(p)
+    return {
+        "error": "chat.html not found",
+        "tried_paths": [str(p) for p in possible_paths]
+    }
